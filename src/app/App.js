@@ -203,6 +203,8 @@ class App extends EventEmitter {
 		 */
 		this.screens = {};
 
+		this.endClickPromiseResolver = null;
+
 		/**
 		 * When set to true the first erroneous popstate fired on page load will be
 		 * ignored, only if <code>globals.window.history.state</code> is also
@@ -427,9 +429,13 @@ class App extends EventEmitter {
 			}
 		};
 
+    const endClickPromise = this.isPrecachingNavigation ?
+      new Promise(resolve => this.endClickPromiseResolver = resolve) : Promise.resolve();
+
 		return this.maybePreventDeactivate_()
 			.then(() => this.maybePreventActivate_(nextScreen))
 			.then(() => nextScreen.load(path))
+      .then(() => endClickPromise)
 			.then(() => {
 				// At this point we cannot stop navigation and all received
 				// navigate candidates will be queued at scheduledNavigationQueue.
@@ -461,7 +467,7 @@ class App extends EventEmitter {
 				finalize();
 				throw reason;
 			});
-	}
+  }
 
 	/**
 	 * Extracts params according to the given path and route.
@@ -1271,7 +1277,18 @@ class App extends EventEmitter {
 		if (this.linkEventHandler_) {
 			this.linkEventHandler_.removeListener();
 		}
-		this.linkEventHandler_ = delegate(document, 'click', this.linkSelector, this.onDocClickDelegate_.bind(this), this.allowPreventNavigate);
+		this.linkEventHandler_ = delegate(document, 'mousedown', this.linkSelector, (event) => {
+		  this.isPrecachingNavigation = true;
+		  return this.onDocClickDelegate_(event);
+    }, this.allowPreventNavigate);
+		this.linkEventHandler_ = delegate(document, 'mouseleave', this.linkSelector, 		  () => {
+      this.isPrecachingNavigation = false;
+    }, this.allowPreventNavigate);
+    this.linkEventHandler_ = delegate(document, 'click', this.linkSelector, event => {
+      event.preventDefault();
+      this.isPrecachingNavigation = false;
+      this.endClickPromiseResolver && this.endClickPromiseResolver();
+    }, this.allowPreventNavigate);
 	}
 
 	/**
